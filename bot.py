@@ -15,7 +15,7 @@ PORT = int(os.environ.get("PORT", 8080))
 OWNER_ID = 1556386435643478047
 ROLE_ID = 1557354880069410826
 CHANNEL_ID = 1557354934201225256
-BOT_NAME = "Sal's Den"
+BOT_NAME = "SAL'S SEX DEN"
 BOT_BIO = "LOOKING OVER SAL'S DEN"
 
 API = "https://discord.com/api/v10"
@@ -24,7 +24,8 @@ SCOPES = "identify"  # only reads username/ID; no joining servers, no DMs
 states: dict[str, float] = {}  # state -> expiry
 
 intents = discord.Intents.default()
-bot = commands.Bot(command_prefix="!", intents=intents, owner_id=OWNER_ID)
+intents.message_content = True  # needed for ? prefix commands
+bot = commands.Bot(command_prefix="?", intents=intents, owner_id=OWNER_ID)
 
 
 # ───────────────────────── website ─────────────────────────
@@ -165,11 +166,27 @@ async def on_ready():
         await post_verify_message()
 
 
-@bot.command()
+@bot.hybrid_command(name="verifybutton", description="Post the verification button (owner only)")
 @commands.is_owner()
-async def postverify(ctx):
-    """Owner only: re-post the verification button."""
+async def verifybutton(ctx):
+    """Works as ?verifybutton and /verifybutton."""
     await post_verify_message()
+    await ctx.send("Verify button posted ♡", ephemeral=True)
+
+
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.NotOwner):
+        await ctx.send("Only Sal can use this command 🎀", ephemeral=True)
+    else:
+        print("Command error:", error)
+
+
+async def setup_hook():
+    await bot.tree.sync()  # registers the slash commands
+
+
+bot.setup_hook = setup_hook
 
 
 async def main():
