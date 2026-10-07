@@ -1,4 +1,5 @@
 import os, time, secrets, html, asyncio
+from urllib.parse import quote
 import aiohttp, discord
 from aiohttp import web
 from discord.ext import commands
@@ -9,14 +10,18 @@ load_dotenv()
 TOKEN = os.environ["DISCORD_TOKEN"]
 CLIENT_ID = os.environ["CLIENT_ID"]
 CLIENT_SECRET = os.environ["CLIENT_SECRET"]
-BASE_URL = os.environ["BASE_URL"].rstrip("/")  # e.g. https://verify.yourdomain.com
+BASE_URL = os.environ["BASE_URL"].strip().rstrip("/")  # e.g. https://verify.yourdomain.com
+if not BASE_URL.startswith(("http://", "https://")):
+    BASE_URL = "https://" + BASE_URL
 PORT = int(os.environ.get("PORT", 8080))
 
 OWNER_ID = 1556386435643478047
 ROLE_ID = 1557354880069410826
 CHANNEL_ID = 1557354934201225256
+UNLOCKED_ID = 1557354914940981308  # category/channel shown for verified members
+PREMIUM_ID = 1557354910536704102   # category/channel shown for boosters
 BOT_NAME = "SAL'S SEX DEN"
-BOT_BIO = "LOOKING OVER SAL'S SEX DEN"
+BOT_BIO = "SAL'S SEX DEN"
 
 API = "https://discord.com/api/v10"
 REDIRECT_URI = f"{BASE_URL}/callback"
@@ -24,8 +29,8 @@ SCOPES = "identify"  # only reads username/ID; no joining servers, no DMs
 states: dict[str, float] = {}  # state -> expiry
 
 intents = discord.Intents.default()
-intents.message_content = True  # needed for ? prefix commands
-bot = commands.Bot(command_prefix="?", intents=intents, owner_id=OWNER_ID)
+intents.message_content = True  # needed for !postverify (enable it in the Developer Portal too)
+bot = commands.Bot(command_prefix="!", intents=intents, owner_id=OWNER_ID)
 
 
 # ───────────────────────── website ─────────────────────────
@@ -74,7 +79,7 @@ async def login(request):
     state = secrets.token_urlsafe(24)
     states[state] = now + 600
     url = (f"https://discord.com/oauth2/authorize?client_id={CLIENT_ID}&response_type=code"
-           f"&redirect_uri={aiohttp.helpers.quote(REDIRECT_URI, safe='')}&scope={SCOPES}&state={state}&prompt=none")
+           f"&redirect_uri={quote(REDIRECT_URI, safe='')}&scope={SCOPES}&state={state}&prompt=none")
     raise web.HTTPFound(url)
 
 
@@ -127,13 +132,27 @@ async def callback(request):
 # ───────────────────────── bot ─────────────────────────
 def verify_embed_and_view():
     embed = discord.Embed(
-        title="🎀 Verify to enter Sal's Den",
-        description="Press the button below, authorize with Discord, and you'll get your role instantly ♡",
+        title="🎀 ˚｡⋆ Welcome to Sal's Den ⋆｡˚ 🎀",
+        description=(
+            "✧･ﾟ: *✧･ﾟ:* 　　 *:･ﾟ✧*:･ﾟ✧\n\n"
+            "🌸 **Verify** to get access to\n"
+            f"﹙🌟﹚ ﹒ <#{UNLOCKED_ID}>\n\n"
+            "💎 **Boost** to get access to\n"
+            f"﹙🌟﹚ ﹒ <#{PREMIUM_ID}>\n\n"
+            "✧･ﾟ: *✧･ﾟ:* 　　 *:･ﾟ✧*:･ﾟ✧\n"
+            "💌 Press the button below, authorize with Discord, "
+            "and your role arrives instantly ♡"
+        ),
         color=0xFF8FBF,
     )
-    embed.set_footer(text="LOOKING OVER SAL'S DEN")
+    embed.set_footer(text="🎀 LOOKING OVER SAL'S DEN 🎀")
     view = discord.ui.View()
-    view.add_item(discord.ui.Button(label="Verify", emoji="🌸", style=discord.ButtonStyle.link, url=BASE_URL))
+    view.add_item(discord.ui.Button(
+        label="Verify Me, Pretty Please",
+        emoji="🌸",
+        style=discord.ButtonStyle.link,
+        url=BASE_URL,
+    ))
     return embed, view
 
 
@@ -143,9 +162,16 @@ async def post_verify_message():
     await channel.send(embed=embed, view=view)
 
 
+_ready_done = False
+
 @bot.event
 async def on_ready():
+    global _ready_done
     print(f"Logged in as {bot.user}")
+    if _ready_done:  # on_ready can fire again after reconnects
+        return
+    _ready_done = True
+
     await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="over Sal's Den"))
     # name (rate-limited by Discord, so only if different)
     if bot.user.name != BOT_NAME:
@@ -157,36 +183,25 @@ async def on_ready():
     async with aiohttp.ClientSession() as s:
         await s.patch(f"{API}/applications/@me", headers={"Authorization": f"Bot {TOKEN}"},
                       json={"description": BOT_BIO})
-    # post the verify button once
+    # post the verify button, or update the existing one with the latest design
     channel = bot.get_channel(CHANNEL_ID)
     if channel:
         async for m in channel.history(limit=25):
             if m.author == bot.user and m.embeds:
+                embed, view = verify_embed_and_view()
+                try:
+                    await m.edit(embed=embed, view=view)
+                except discord.HTTPException as e:
+                    print("Couldn't update verify message:", e)
                 return
         await post_verify_message()
 
 
-@bot.hybrid_command(name="verifybutton", description="Post the verification button (owner only)")
+@bot.command()
 @commands.is_owner()
-async def verifybutton(ctx):
-    """Works as ?verifybutton and /verifybutton."""
+async def postverify(ctx):
+    """Owner only: re-post the verification button."""
     await post_verify_message()
-    await ctx.send("Verify button posted ♡", ephemeral=True)
-
-
-@bot.event
-async def on_command_error(ctx, error):
-    if isinstance(error, commands.NotOwner):
-        await ctx.send("Only Sal can use this command 🎀", ephemeral=True)
-    else:
-        print("Command error:", error)
-
-
-async def setup_hook():
-    await bot.tree.sync()  # registers the slash commands
-
-
-bot.setup_hook = setup_hook
 
 
 async def main():
